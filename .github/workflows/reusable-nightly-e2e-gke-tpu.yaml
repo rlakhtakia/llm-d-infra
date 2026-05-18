@@ -108,6 +108,12 @@ on:
         required: false
         type: number
         default: 0
+      tpu_nodepool:
+        description: 'Target GKE TPU node pool name (empty = do not override)'
+        required: false
+        type: string
+        default: ''
+
 
       # --- Model & accelerator ---
       model_id:
@@ -198,6 +204,7 @@ jobs:
       GKE_CLUSTER_NAME: ${{ inputs.gke_cluster_name }}
       GKE_CLUSTER_ZONE: ${{ inputs.gke_cluster_zone }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      TPU_NODEPOOL: ${{ inputs.tpu_nodepool }}
     steps:
       - name: Checkout llm-d/llm-d
         uses: actions/checkout@v6
@@ -261,6 +268,68 @@ jobs:
           else
             echo "Cordoned nodes:$CORDONED_NODES"
           fi
+
+      - name: Request TPUs (DWS)
+        if: inputs.required_tpu_chips > 0
+        run: |
+          # Map inputs to dynamic TPU request parameters
+          REQUIRED_TPUS="${{ inputs.required_tpu_chips }}"
+          RECOMMENDED_TPUS="${{ inputs.recommended_tpu_chips }}"
+          CHIPS_TO_REQUEST=$REQUIRED_TPUS
+          if [ "$RECOMMENDED_TPUS" -gt "$REQUIRED_TPUS" ]; then
+            CHIPS_TO_REQUEST=$RECOMMENDED_TPUS
+          fi
+
+          ACCELERATOR="tpu-v6e-slice"
+          TOPOLOGY="2x4"
+          CHIPS_PER_VM=8
+
+          VMS=$(( CHIPS_TO_REQUEST / CHIPS_PER_VM ))
+          if [ "$VMS" -lt 1 ]; then
+            VMS=1
+          fi
+
+          echo "Dynamic TPU request parameters calculated:"
+          echo "  CHIPS_TO_REQUEST: $CHIPS_TO_REQUEST"
+          echo "  ACCELERATOR: $ACCELERATOR"
+          echo "  TOPOLOGY: $TOPOLOGY"
+          echo "  CHIPS_PER_VM: $CHIPS_PER_VM"
+          echo "  VMS: $VMS"
+
+          cat <<EOF | kubectl apply -n "$NAMESPACE" -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: tpu-request-job
+          spec:
+            parallelism: $VMS
+            completions: $VMS
+            template:
+              spec:
+                nodeSelector:
+                  cloud.google.com/gke-flex-start: "true"
+                  cloud.google.com/gke-tpu-accelerator: $ACCELERATOR
+                  cloud.google.com/gke-tpu-topology: "$TOPOLOGY"
+                containers:
+                - name: tpu-container
+                  image: gcr.io/k8s-staging-perf-tests/sleep:latest
+                  args: ["3600s"]
+                  resources:
+                    requests:
+                      google.com/tpu: "$CHIPS_PER_VM"
+                    limits:
+                      google.com/tpu: "$CHIPS_PER_VM"
+                restartPolicy: OnFailure
+          EOF
+
+          kubectl wait pod \
+            --for=condition=Ready \
+            -l job-name=tpu-request-job \
+            -n "$NAMESPACE" \
+            --timeout=45m
+
+          # Release the chips so test can use them
+          kubectl delete job tpu-request-job -n "$NAMESPACE"
 
       - name: Check TPU availability
         id: tpu-check
@@ -414,6 +483,31 @@ jobs:
           fi
         env:
           IMAGE_OVERRIDE: ${{ inputs.image_override }}
+
+      - name: Override TPU Node Selector
+        if: inputs.required_tpu_chips > 0
+        run: |
+          set -euo pipefail
+          echo "Overriding TPU selectors in guide YAML files..."
+          YAML_FILES=$(find "$GUIDE_PATH" -type f \( -name "*.yaml" -o -name "*.yml" \))
+          if [ -z "$YAML_FILES" ]; then
+            echo "::warning::No yaml/yml files found in $GUIDE_PATH — TPU override will have no effect"
+          else
+            for file in $YAML_FILES; do
+              # Sync GKE v6e-8t TPU parameters recursively (2x4 topology, tpu-v6e-slice accelerator, and flex-start selector)
+              echo "Syncing GKE TPU nodeSelectors recursively in ${file}..."
+              yq e '
+                (.. | select(has("nodeSelector")) | .nodeSelector."cloud.google.com/gke-tpu-topology") = "2x4" |
+                (.. | select(has("nodeSelector")) | .nodeSelector."cloud.google.com/gke-tpu-accelerator") = "tpu-v6e-slice" |
+                (.. | select(has("nodeSelector")) | .nodeSelector."cloud.google.com/gke-flex-start") = "true"
+              ' -i "$file"
+
+              if [ -n "$TPU_NODEPOOL" ]; then
+                echo "Setting GKE node pool to $TPU_NODEPOOL recursively in ${file}..."
+                yq e '(.. | select(has("nodeSelector")) | .nodeSelector."cloud.google.com/gke-nodepool") = strenv(TPU_NODEPOOL)' -i "$file"
+              fi
+            done
+          fi
 
       - name: Run pre-deploy script
         if: inputs.pre_deploy_script != ''

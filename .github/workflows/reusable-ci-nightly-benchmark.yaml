@@ -351,6 +351,7 @@ jobs:
 
       - name: Conditionally clone llm-d from main repo
         run: |
+          find ~ -type f -name "cks_nvshmem3.3.9.patch" -print
           cd ~
           if [[ ! -d llm-d ]];
           then

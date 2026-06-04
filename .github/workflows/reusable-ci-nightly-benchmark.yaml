@@ -178,7 +178,7 @@ jobs:
           fi
           IS_HPU=$(echo "${{ github.workflow }}" | grep -i "\hpu" || true)$(echo "${{ inputs.standup_scenario }}" | grep -i "hpu" || true)
           if [[ ! -z $IS_HPU ]]; then
-            export CLUSTER_TYPE=hpu-dispatch-runner
+            export CLUSTER_TYPE=hpu
           fi
           echo "Cluster provider is \"$CLUSTER_TYPE\""
           echo "cluster_type=$CLUSTER_TYPE" >> "$GITHUB_OUTPUT"
@@ -194,6 +194,12 @@ jobs:
           elif [[ "$CLUSTER_TYPE" == "rocm" ]]; then
             echo "Targetting self-hosted runners (AMD/CI)"
             RUNNERS_JSON_LIST='["rocm"]'
+          elif [[ "$CLUSTER_TYPE" == "xpu" ]]; then
+            echo "Targetting self-hosted runners (Intel/CI)"
+            RUNNERS_JSON_LIST='["xpu"]'
+          elif [[ "$CLUSTER_TYPE" == "hpu" ]]; then
+            echo "Targetting self-hosted runners (Intel/CI)"
+            RUNNERS_JSON_LIST='["hpu-dispatch-runner"]'                        
           else
             echo "Targetting hosted runners (non-OpenShift)"
             RUNNERS_JSON_LIST='["ubuntu-latest"]'

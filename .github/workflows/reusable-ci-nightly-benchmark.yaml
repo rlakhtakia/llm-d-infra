@@ -269,6 +269,7 @@ jobs:
       LLMDBENCH_CICD_WAIT_TIMEOUT: 1200
       LLMDBENCH_CICD_JOB_TIMEOUT: 2700s
       LLMDBENCH_CICD_KUSTOMIZE_STANDUP_TIMEOUT: 1200
+      LLMDBENCH_CICD_RUN_TIMEOUT: 3600
       LLMDBENCH_CICD_DECODE_PODS: ${{ inputs.decode_pods || 'auto' }}
       LLMDBENCH_CICD_PREFILL_PODS: ${{ inputs.prefill_pods || 'auto' }}
       LLMDBENCH_WORKSPACE: ${{ inputs.workspace_dir || '/tmp/llmdbenchcicd' }}
@@ -644,7 +645,7 @@ jobs:
         run: |
           cd ~
           touch ~/work/lkcmd.txt
-          kubectl create namespace $LLMDBENCH_CICD_NS --dry-run=client -o yaml | kubectl apply -f -          
+          kubectl create namespace $LLMDBENCH_CICD_NS --dry-run=client -o yaml | kubectl apply -f -
           if [[ $LLMDBENCH_CICD_METHOD == "kustomize" ]]; then
             if [[ -z $LLMDBENCH_HF_TOKEN ]]; then
               echo "#### Assigning fake value to LLMDBENCH_HF_TOKEN"
@@ -693,7 +694,9 @@ jobs:
       - name: Set up extra command line parameters
         run: |
           export LLMDBENCH_EXTRA_CMD=""
-          export LLMDBENCH_EXTRA_OPERATION_CMD=""
+          export LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD=""
+          export LLMDBENCH_EXTRA_RUN_OPERATION_CMD=""
+          export LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD=""
           if [[ $LLMDBENCH_CICD_METHOD == "kustomize" ]]; then
             export LLMDBENCH_EXTRA_CMD="--non-admin"
           fi
@@ -703,19 +706,28 @@ jobs:
           if [[ "$LLMDBENCH_IS_VERBOSE" == "true" ]]; then
             export LLMDBENCH_EXTRA_CMD="--verbose $LLMDBENCH_EXTRA_CMD "
           fi
-          #if [[ $LLMDBENCH_CICD_METHOD == "kustomize" ]]; then
-          #  export LLMDBENCH_EXTRA_OPERATION_CMD="--kustomize-deploy-timeout $LLMDBENCH_CICD_KUSTOMIZE_STANDUP_TIMEOUT $LLMDBENCH_EXTRA_OPERATION_CMD "
-          #fi
+          if [[ $LLMDBENCH_CICD_METHOD == "kustomize" ]]; then
+            export LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD="--kustomize-deploy-timeout $LLMDBENCH_CICD_KUSTOMIZE_STANDUP_TIMEOUT $LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD "
+          fi
+          export LLMDBENCH_EXTRA_RUN_OPERATION_CMD="--wait-timeout $LLMDBENCH_CICD_RUN_TIMEOUT $LLMDBENCH_EXTRA_RUN_OPERATION_CMD "
           if [[ "$LLMDBENCH_MONITORING_ENABLED" == "false" ]]; then
-            export LLMDBENCH_EXTRA_OPERATION_CMD="--no-monitoring $LLMDBENCH_EXTRA_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD="--no-monitoring $LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_RUN_OPERATION_CMD="--no-monitoring $LLMDBENCH_EXTRA_RUN_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD="--no-monitoring $LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD "
           fi
           if [[ ! -z $LLMDBENCH_CICD_DETECTED_MODEL ]]; then
-            export LLMDBENCH_EXTRA_OPERATION_CMD="--models $LLMDBENCH_CICD_DETECTED_MODEL $LLMDBENCH_EXTRA_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD="--models $LLMDBENCH_CICD_DETECTED_MODEL $LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_RUN_OPERATION_CMD="--models $LLMDBENCH_CICD_DETECTED_MODEL $LLMDBENCH_EXTRA_RUN_OPERATION_CMD "
+            export LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD="--models $LLMDBENCH_CICD_DETECTED_MODEL $LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD "
           fi
           echo "### LLMDBENCH_EXTRA_CMD is \"$LLMDBENCH_EXTRA_CMD\""
           echo "LLMDBENCH_EXTRA_CMD=$LLMDBENCH_EXTRA_CMD" >> $GITHUB_ENV
-          echo "### LLMDBENCH_EXTRA_OPERATION_CMD is \"$LLMDBENCH_EXTRA_OPERATION_CMD\""
-          echo "LLMDBENCH_EXTRA_OPERATION_CMD=$LLMDBENCH_EXTRA_OPERATION_CMD" >> $GITHUB_ENV
+          echo "### LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD is \"$LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD\""
+          echo "LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD=$LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD" >> $GITHUB_ENV
+          echo "### LLMDBENCH_EXTRA_RUN_OPERATION_CMD is \"$LLMDBENCH_EXTRA_RUN_OPERATION_CMD\""
+          echo "LLMDBENCH_EXTRA_RUN_OPERATION_CMD=$LLMDBENCH_EXTRA_RUN_OPERATION_CMD" >> $GITHUB_ENV
+          echo "### LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD is \"$LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD\""
+          echo "LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD=$LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD" >> $GITHUB_ENV
           export LLMDBENCH_CICD_GATEWAY_CLASS=$(echo "$LLMDBENCH_CICD_GATEWAY_CLASS" | sed 's^standalone^epponly^g')
           echo "LLMDBENCH_CICD_GATEWAY_CLASS is \"$LLMDBENCH_CICD_GATEWAY_CLASS\""
           echo "LLMDBENCH_CICD_GATEWAY_CLASS=$LLMDBENCH_CICD_GATEWAY_CLASS"  >> $GITHUB_ENV
@@ -733,7 +745,7 @@ jobs:
       - name: Standup
         run: |
           cd ~/work/llm-d-benchmark/llm-d-benchmark/
-          LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD standup $LLMDBENCH_EXTRA_OPERATION_CMD --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --release $LLMDBENCH_CICD_R --methods $LLMDBENCH_CICD_METHOD"
+          LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD standup $LLMDBENCH_EXTRA_STANDUP_OPERATION_CMD --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --release $LLMDBENCH_CICD_R --methods $LLMDBENCH_CICD_METHOD"
           echo "### $(cat ~/work/lkcmd.txt); $LLMDBENCH_CMD ###"
           eval $LLMDBENCH_CMD
         shell: bash
@@ -758,7 +770,7 @@ jobs:
           elif [[ "$LLMDBENCH_CICD_TARGET" == "cks" && "${{ inputs.standup_method }}" == "fma" ]]; then
             echo "Temporarily unable to test \"fma\" on \"cks\" clusters"
           else
-            LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD run --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --methods $LLMDBENCH_CICD_METHOD --harness $LLMDBENCH_CICD_HARNESS --workload $LLMDBENCH_CICD_WORKLOAD --data-access-timeout $LLMDBENCH_CICD_DATA_ACCESS_TIMEOUT --wait-timeout $LLMDBENCH_CICD_WAIT_TIMEOUT"
+            LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD run $LLMDBENCH_EXTRA_RUN_OPERATION_CMD --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --methods $LLMDBENCH_CICD_METHOD --harness $LLMDBENCH_CICD_HARNESS --workload $LLMDBENCH_CICD_WORKLOAD --data-access-timeout $LLMDBENCH_CICD_DATA_ACCESS_TIMEOUT --wait-timeout $LLMDBENCH_CICD_WAIT_TIMEOUT"
             echo "### $(cat ~/work/lkcmd.txt); $LLMDBENCH_CMD ###"
             eval $LLMDBENCH_CMD
           fi
@@ -768,7 +780,7 @@ jobs:
         if: env.LLMDBENCH_CICD_CLEANUP == 'true'
         run: |
           cd ~/work/llm-d-benchmark/llm-d-benchmark/
-          LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD teardown --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --release $LLMDBENCH_CICD_R --methods $LLMDBENCH_CICD_METHOD"
+          LLMDBENCH_CMD="llmdbenchmark --spec $LLMDBENCH_CICD_SCENARIO_DIR/$LLMDBENCH_CICD_SCENARIO $LLMDBENCH_EXTRA_CMD teardown $LLMDBENCH_EXTRA_TEARDOWN_OPERATION_CMD  --namespace $LLMDBENCH_CICD_NS --gateway-class $LLMDBENCH_CICD_GATEWAY_CLASS --release $LLMDBENCH_CICD_R --methods $LLMDBENCH_CICD_METHOD"
           echo "### $LLMDBENCH_CMD ###"
           $LLMDBENCH_CMD
           kubectl -n "$LLMDBENCH_CICD_NS" exec -i access-to-harness-data-workload-pvc -- bash -c "rm -rf /requests/*" || true

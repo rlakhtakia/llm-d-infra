@@ -744,14 +744,14 @@ jobs:
             llmd_repo_path="$GITHUB_WORKSPACE"
           else
             llmd_repo_path=$(mktemp -d "$RUNNER_TEMP/llm-d.XXXXXX")
-            git clone --depth 1 --branch main https://github.com/llm-d/llm-d.git "$llmd_repo_path"
+            git clone --depth 1 --branch main https://github.com/rlakhtakia/llm-d.git "$llmd_repo_path"
           fi
 
           if [[ "$caller_repo_name" == "llm-d-benchmark" ]]; then
             benchmark_repo_path="$GITHUB_WORKSPACE"
           else
             benchmark_repo_path=$(mktemp -d "$RUNNER_TEMP/llm-d-benchmark.XXXXXX")
-            git clone --depth 1 --branch main https://github.com/llm-d/llm-d-benchmark.git "$benchmark_repo_path"
+            git clone --depth 1 --branch main https://github.com/rlakhtakia/llm-d-benchmark.git "$benchmark_repo_path"
           fi
 
           echo "### llm-d source: $llmd_repo_path ($(git -C "$llmd_repo_path" rev-parse HEAD))"
@@ -778,13 +778,13 @@ jobs:
           pip uninstall -y llmdbenchmark || true
           cd "$LLMDBENCH_CICD_BENCHMARK_PATH"
           if [[ ! -f install.sh ]]; then
-            curl -sSL https://raw.githubusercontent.com/llm-d/llm-d-benchmark/main/install.sh -o install.sh
+            curl -sSL https://raw.githubusercontent.com/rlakhtakia/llm-d-benchmark/main/install.sh -o install.sh
             chmod +x install.sh
           fi
           ./install.sh -y
           llmdbenchmark --version
           if [[ ! -f util/debug_info_on_failure.sh ]]; then
-            curl -sSL https://raw.githubusercontent.com/llm-d/llm-d-benchmark/refs/heads/main/util/debug_info_on_failure.sh -o /tmp/debug_info_on_failure.sh
+            curl -sSL https://raw.githubusercontent.com/rlakhtakia/llm-d-benchmark/refs/heads/main/util/debug_info_on_failure.sh -o /tmp/debug_info_on_failure.sh
             chmod +x /tmp/debug_info_on_failure.sh
             sudo cp /tmp/debug_info_on_failure.sh /usr/local/bin
           else

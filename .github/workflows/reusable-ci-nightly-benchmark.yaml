@@ -2,6 +2,9 @@ name: CI - Generic Nightly Run Benchmark
 
 on:
   workflow_call:
+    secrets:
+      GKE_SA_KEY:
+        required: false
     inputs:
       scenario_dir:
         description: 'Directory housing the scenarios'
